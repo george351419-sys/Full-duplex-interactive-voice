@@ -1,0 +1,14 @@
+{
+  "name": "@magic-pet/full-duplex-voice",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "peerDependencies": {
+    "@volcengine/rtc": "^4.68.4",
+    "express": "^4.19.2",
+    "react": "^18.3.1"
+  }
+}
