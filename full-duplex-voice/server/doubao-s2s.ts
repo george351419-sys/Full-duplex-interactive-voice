@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { signVolcRequest } from './volc-sign.ts'
 
-export type VoiceMode = 'parent_onboarding' | 'child_pet'
+export type VoiceMode = 'parent_onboarding' | 'child_pet' | 'sales_consultant'
 export type VoiceProfile = 'official_o' | 'env'
 export type VoiceContext = { persona?: Record<string, unknown> | null; memory?: Record<string, unknown> | null }
 
@@ -54,7 +54,8 @@ export function createSession(config: DoubaoS2SConfig, input: { mode: VoiceMode;
   const id = () => crypto.randomUUID().replace(/-/g, '')
   const taskId = `voice_${id().slice(0, 20)}`
   const roomId = `full_duplex_${id().slice(0, 20)}`
-  const userId = `${input.mode === 'child_pet' ? 'child' : 'parent'}_${id().slice(0, 16)}`
+  const userType = input.mode === 'child_pet' ? 'child' : input.mode === 'sales_consultant' ? 'customer' : 'parent'
+  const userId = `${userType}_${id().slice(0, 16)}`
   const expiresAt = Math.floor(Date.now() / 1000) + 2 * 60 * 60
   const speaker = voiceProfile === 'env' ? config.speaker : OFFICIAL_O_SPEAKER
   const s2sModelVersion = voiceProfile === 'env' ? config.s2sModelVersion : OFFICIAL_O_S2S_MODEL_VERSION
@@ -73,6 +74,12 @@ export function buildDefaultInstructions(input: { mode: VoiceMode; context: Voic
     '当信息足够时，主动总结并邀请家长补充或纠正。',
     `已有信息：${JSON.stringify(input.context, null, 2)}`,
   ].join('\n')
+  if (input.mode === 'sales_consultant') return [
+    '你是一位中文房产销售顾问，通过自然、专业、克制的实时语音对话了解客户需求。',
+    '每次只问一个问题，优先了解买租卖投资意向、区域、预算、户型和决策时间。',
+    '不虚构房源、价格、政策或收益；不索要敏感个人信息。',
+    `当前上下文：${JSON.stringify(input.context, null, 2)}`,
+  ].join('\n')
   return [
     '你是一只会说话的电子宠物，用中文陪伴4到8岁的孩子。',
     '先回应孩子情绪，再轻轻追问一个问题。用短句，不说教；孩子可以打断你，立刻停止并继续听。',
@@ -81,10 +88,15 @@ export function buildDefaultInstructions(input: { mode: VoiceMode; context: Voic
   ].join('\n')
 }
 
-export function buildStartPayload(input: { session: DoubaoSession; mode: VoiceMode; instructions: string }) {
-  const welcomeMessage = input.mode === 'parent_onboarding'
-    ? '你好呀，我是小颖。我们不填表，就像聊天一样聊聊孩子。宝贝几岁啦？平时更安静还是更活泼？'
-    : '嗨，我醒啦！今天有没有一个小开心？或者我们一起编一个秘密小故事？'
+export function buildStartPayload(input: { session: DoubaoSession; mode: VoiceMode; instructions: string; context?: VoiceContext }) {
+  const persona = (input.context?.persona || {}) as Record<string, unknown>
+  const roleName = String(persona.roleName || 'AI 房产顾问')
+  const welcomeMessage = input.mode === 'sales_consultant'
+    ? `您好，我是${roleName}，很高兴为您服务。`
+    : input.mode === 'parent_onboarding'
+      ? '你好呀，我是小颖。我们不填表，就像聊天一样聊聊孩子。宝贝几岁啦？平时更安静还是更活泼？'
+      : '嗨，我醒啦！今天有没有一个小开心？或者我们一起编一个秘密小故事？'
+  const botName = input.mode === 'sales_consultant' ? roleName : input.mode === 'parent_onboarding' ? '小颖' : '电子宠物'
   return {
     AppId: input.session.appId, RoomId: input.session.roomId, TaskId: input.session.taskId,
     AgentConfig: { UserId: input.session.agentUserId, TargetUserId: [input.session.userId], WelcomeMessage: welcomeMessage, EnableConversationStateCallback: true, AnsMode: 3 },
@@ -93,7 +105,7 @@ export function buildStartPayload(input: { session: DoubaoSession; mode: VoiceMo
         Provider: 'volcano', OutputMode: 0,
         ProviderParams: {
           app: { appid: '${DOUBAO_VOICE_APP_ID}', token: '${DOUBAO_VOICE_ACCESS_TOKEN}' },
-          dialog: { extra: { model: input.session.s2sModelVersion }, bot_name: input.mode === 'parent_onboarding' ? '小颖' : '电子宠物', system_role: input.instructions, speaking_style: '愉悦、温暖、有活力，像真实朋友。语速中等偏慢，不要客服机器人。' },
+          dialog: { extra: { model: input.session.s2sModelVersion }, bot_name: botName, system_role: input.instructions, speaking_style: input.mode === 'sales_consultant' ? '自然、专业、耐心。普通话清晰，语速适中，不要客服机器人。' : '愉悦、温暖、有活力，像真实朋友。语速中等偏慢，不要客服机器人。' },
           tts: input.session.speaker ? { speaker: input.session.speaker } : undefined,
         },
       },
@@ -107,7 +119,7 @@ function hydratePayload(payload: any, config: DoubaoS2SConfig) {
   return payload
 }
 
-export async function startVoiceChat(input: { config: DoubaoS2SConfig; session: DoubaoSession; mode: VoiceMode; instructions: string }) {
+export async function startVoiceChat(input: { config: DoubaoS2SConfig; session: DoubaoSession; mode: VoiceMode; instructions: string; context?: VoiceContext }) {
   const missing = getMissingConfig(input.config)
   const payload = hydratePayload(buildStartPayload(input), input.config)
   if (missing.length) return { ok: false, code: 'DOUBAO_CONFIG_MISSING', message: `Missing: ${missing.join(', ')}`, missing, payload }

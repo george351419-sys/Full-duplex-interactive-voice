@@ -30,7 +30,7 @@ export function createDoubaoRealtimeRouter(options: FullDuplexVoiceRouterOptions
     if (!session?.roomId || !session?.taskId || !session?.token) return res.status(400).json({ error: 'session.roomId, session.taskId and session.token are required' })
     const requestMode = mode(req)
     const context: VoiceContext = req.body?.context || {}
-    const result = await startVoiceChat({ config: getConfig(), session, mode: requestMode, instructions: instructions({ mode: requestMode, context }) })
+    const result = await startVoiceChat({ config: getConfig(), session, mode: requestMode, context, instructions: instructions({ mode: requestMode, context }) })
     res.status(result.ok ? 200 : result.code === 'DOUBAO_CONFIG_MISSING' ? 503 : 502).json(result)
   })
   router.post('/interrupt', async (req, res) => respond(res, await interruptVoiceChat(getConfig(), req.body || {})))
@@ -38,5 +38,9 @@ export function createDoubaoRealtimeRouter(options: FullDuplexVoiceRouterOptions
   return router
 }
 
-function mode(req: Request): VoiceMode { return req.body?.mode === 'child_pet' ? 'child_pet' : 'parent_onboarding' }
+function mode(req: Request): VoiceMode {
+  if (req.body?.mode === 'child_pet') return 'child_pet'
+  if (req.body?.mode === 'sales_consultant') return 'sales_consultant'
+  return 'parent_onboarding'
+}
 function respond(res: Response, result: any) { res.status(result.ok ? 200 : result.status || 502).json(result) }

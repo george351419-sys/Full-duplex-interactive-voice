@@ -27,6 +27,8 @@ test('publishes, forwards subtitles, then tears down a mocked RTC engine', async
   assert.deepEqual(calls.slice(0, 4), ['join', 'subtitle:start', 'capture:start', 'publish'])
   assert.equal(transcript[0]?.role, 'agent')
   assert.equal(transcript[0]?.content, '你好呀')
+  handlers.get('subtitle-event')?.([{ userId: { toString: () => 'agent_voice_12345' }, text: '我是 AI 顾问', definite: true, sequence: 8 }])
+  assert.equal(transcript[1]?.role, 'agent')
   await controller.stop()
   assert.ok(calls.includes('unpublish'))
   assert.ok(calls.includes('leave'))

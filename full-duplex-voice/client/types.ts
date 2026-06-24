@@ -1,4 +1,4 @@
-export type VoiceMode = 'parent_onboarding' | 'child_pet'
+export type VoiceMode = 'parent_onboarding' | 'child_pet' | 'sales_consultant'
 export type VoiceProfile = 'official_o' | 'env'
 export type VoicePhase = 'idle' | 'checking' | 'ready' | 'connecting' | 'connected' | 'error' | 'ended'
 
@@ -23,7 +23,7 @@ export type VoiceSession = {
 }
 
 export type TranscriptTurn = {
-  role: 'parent' | 'child' | 'agent'
+  role: 'parent' | 'child' | 'customer' | 'agent'
   content: string
   final: boolean
   sequence: number

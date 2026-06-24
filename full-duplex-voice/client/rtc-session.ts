@@ -96,11 +96,16 @@ export function createRtcSession(options: Options): RtcSessionController {
     for (const item of items || []) {
       const content = String(item?.text || '').trim()
       if (!content) continue
+      const subtitleUserId = String(item?.userId ?? '')
+      const isAgent = subtitleUserId === String(remoteUserId ?? '') || subtitleUserId === String(options.session.agentUserId)
       options.onTranscript({
-        role: item.userId === remoteUserId || item.userId === options.session.agentUserId ? 'agent' : 'parent',
+        role: isAgent ? 'agent' : 'parent',
         content, final: Boolean(item.definite), sequence: Number(item.sequence || 0),
       })
     }
+  })
+  engine.on(sdk.events.onSubtitleStateChanged, (event: any) => {
+    if (Number(event?.event) === 2) options.onDiagnostic(`RTC 字幕服务错误：${event?.errorMessage || event?.errorCode || '未知错误'}`)
   })
   engine.on(sdk.events.onAutoplayFailed, () => { if (remoteUserId) attachRemoteTrack(remoteUserId) })
   engine.on(sdk.events.onError, (event: any) => options.onStatus(`RTC 异常：${message(event)}`))
@@ -111,7 +116,7 @@ export function createRtcSession(options: Options): RtcSessionController {
       await engine.joinRoom(options.session.token, options.session.roomId, { userId: options.session.userId }, {
         isAutoPublish: false, isAutoSubscribeAudio: true, isAutoSubscribeVideo: false, roomProfileType: RoomProfileType.chatRoom,
       })
-      try { await engine.startSubtitle?.({ mode: SUBTITLE_MODE.ASR_ONLY, targetLanguage: 'zh' }) } catch { options.onDiagnostic('字幕启动失败，会继续提供语音。') }
+      try { await engine.startSubtitle?.({ mode: SUBTITLE_MODE.ASR_ONLY, targetLanguage: 'zh' }) } catch (error) { options.onDiagnostic(`RTC 字幕启动失败：${message(error)}`) }
       await engine.startAudioCapture()
       await engine.publishStream(MediaType.AUDIO)
       options.onDiagnostic('麦克风已发布到 RTC 房间。')

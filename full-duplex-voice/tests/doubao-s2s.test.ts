@@ -26,4 +26,25 @@ test('creates an official-voice RTC session and S2S payload', () => {
 test('builds mode-specific Chinese instructions', () => {
   assert.match(buildDefaultInstructions({ mode: 'parent_onboarding', context: { persona: { childName: '豆豆' } } }), /访谈/)
   assert.match(buildDefaultInstructions({ mode: 'child_pet', context: { memory: { summary: '喜欢恐龙' } } }), /电子宠物/)
+  assert.match(buildDefaultInstructions({ mode: 'sales_consultant', context: {} }), /房产销售顾问/)
+})
+
+test('builds a sales-consultant greeting without parent-interview content', () => {
+  const session = createSession(getDoubaoS2SConfig(env), { mode: 'sales_consultant' })
+  const payload = buildStartPayload({ session, mode: 'sales_consultant', instructions: 'sales instructions' })
+  assert.match(session.userId, /^customer_/)
+  assert.equal(payload.AgentConfig.WelcomeMessage.includes('孩子'), false)
+  assert.equal(payload.Config.S2SConfig.ProviderParams.dialog.bot_name, 'AI 房产顾问')
+})
+
+test('uses the selected custom module role without reading its opening principle aloud', () => {
+  const session = createSession(getDoubaoS2SConfig(env), { mode: 'sales_consultant' })
+  const payload = buildStartPayload({
+    session,
+    mode: 'sales_consultant',
+    instructions: 'education instructions',
+    context: { persona: { roleName: '课程咨询顾问' }, memory: { moduleOpening: '先了解孩子的学习目标和当前情况。' } },
+  })
+  assert.equal(payload.Config.S2SConfig.ProviderParams.dialog.bot_name, '课程咨询顾问')
+  assert.equal(payload.AgentConfig.WelcomeMessage, '您好，我是课程咨询顾问，很高兴为您服务。')
 })
