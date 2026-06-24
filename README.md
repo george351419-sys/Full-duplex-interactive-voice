@@ -15,7 +15,7 @@ npm run dev:server
 npm run dev
 ```
 
-打开 `http://localhost:5173`。浏览器必须允许麦克风；实时语音需要在火山引擎开通 RTC 与豆包 S2S。
+打开 `http://localhost:5174`。浏览器必须允许麦克风；实时语音需要在火山引擎开通 RTC 与豆包 S2S。
 
 ## Vercel
 

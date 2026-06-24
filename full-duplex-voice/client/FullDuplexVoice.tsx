@@ -12,9 +12,9 @@ export type FullDuplexVoiceProps = {
   title?: string
   eyebrow?: string
   initialStatus?: string
-  checkLabel?: string
   startLabel?: string
   className?: string
+  showTranscript?: boolean
   renderAvatar?: (state: VoiceState) => ReactNode
   onTranscript?: (turn: TranscriptTurn) => void
   onStateChange?: (state: VoiceState) => void
@@ -25,8 +25,8 @@ const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实
 
 export function FullDuplexVoice({
   mode, context = {}, apiBaseUrl = '/api/full-duplex-voice', voiceProfile = 'official_o', title,
-  eyebrow, initialStatus, checkLabel = '检查语音通路', startLabel = '开始实时对话',
-  className = '', renderAvatar, onTranscript, onStateChange, onComplete,
+  eyebrow, initialStatus, startLabel = '开始对话',
+  className = '', showTranscript = true, renderAvatar, onTranscript, onStateChange, onComplete,
 }: FullDuplexVoiceProps) {
   const [state, setState] = useState<VoiceState>(() => ({ ...initialState, status: initialStatus || initialState.status }))
   const [turns, setTurns] = useState<TranscriptTurn[]>([])
@@ -36,9 +36,11 @@ export function FullDuplexVoice({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const analyserCleanupRef = useRef<(() => void) | null>(null)
   const turnsRef = useRef<TranscriptTurn[]>([])
+  const browserRecognitionRef = useRef<any>(null)
+  const browserRecognitionActiveRef = useRef(false)
 
-  const label = title || (mode === 'parent_onboarding' ? '实时语音访谈' : '实时语音陪伴')
-  const labelEyebrow = eyebrow || (mode === 'parent_onboarding' ? '家长访谈' : '儿童陪伴')
+  const label = title || (mode === 'sales_consultant' ? 'AI 销售顾问' : mode === 'parent_onboarding' ? '实时语音访谈' : '实时语音陪伴')
+  const labelEyebrow = eyebrow || (mode === 'sales_consultant' ? '销售跟进' : mode === 'parent_onboarding' ? '家长访谈' : '儿童陪伴')
   const update = (next: Partial<VoiceState>) => setState((previous) => ({ ...previous, ...next }))
   const addDiagnostic = (line: string) => setState((previous) => ({ ...previous, diagnostics: [...previous.diagnostics.slice(-7), line] }))
 
@@ -82,6 +84,7 @@ export function FullDuplexVoice({
         onTranscript: receiveTurn,
       })
       await rtcRef.current.start()
+      startBrowserTranscription()
       await startVoiceSession({ baseUrl: apiBaseUrl, session, mode, context })
       update({ phase: 'connected', status: '已连接，直接说话即可。' })
     } catch (error: any) {
@@ -91,7 +94,8 @@ export function FullDuplexVoice({
   }
 
   function receiveTurn(turn: TranscriptTurn) {
-    const adjusted: TranscriptTurn = { ...turn, role: turn.role === 'parent' && mode === 'child_pet' ? 'child' : turn.role }
+    const role = turn.role === 'parent' && mode === 'child_pet' ? 'child' : turn.role === 'parent' && mode === 'sales_consultant' ? 'customer' : turn.role
+    const adjusted: TranscriptTurn = { ...turn, role }
     turnsRef.current = mergeTurn(turnsRef.current, adjusted)
     setTurns(turnsRef.current.slice(-12))
     onTranscript?.(adjusted)
@@ -111,9 +115,14 @@ export function FullDuplexVoice({
 
   async function end() {
     const session = sessionRef.current
-    const result = session ? { session, mode, transcript: turnsRef.current.filter((turn) => turn.final), durationSeconds: state.elapsedSeconds } : null
+    // Some RTC subtitle events never set `definite` before a caller hangs up.
+    // `turnsRef` already keeps the latest version for each turn sequence.
+    const result = session ? { session, mode, transcript: turnsRef.current.filter((turn) => turn.content.trim()), durationSeconds: state.elapsedSeconds } : null
     await teardown(true)
-    if (result) await onComplete?.(result)
+    if (result) {
+      try { await onComplete?.(result) }
+      catch (error: any) { update({ phase: 'error', status: `对话已结束，但整理失败：${readableError(error)}` }) }
+    }
   }
 
   async function teardown(remote: boolean, announce = true) {
@@ -122,6 +131,7 @@ export function FullDuplexVoice({
     await rtcRef.current?.stop().catch(() => {})
     rtcRef.current = null
     analyserCleanupRef.current?.(); analyserCleanupRef.current = null
+    stopBrowserTranscription()
     streamRef.current?.getTracks().forEach((track) => track.stop()); streamRef.current = null
     sessionRef.current = null
     if (announce) update({ phase: 'ended', muted: false, inputLevel: 0, remoteLevel: 0, status: '实时语音已结束。' })
@@ -139,6 +149,34 @@ export function FullDuplexVoice({
     analyserCleanupRef.current = () => { cancelAnimationFrame(frame); void audioContext.close() }
   }
 
+  function startBrowserTranscription() {
+    const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!Recognition) return
+    browserRecognitionActiveRef.current = true
+    const recognition = new Recognition()
+    recognition.lang = 'zh-CN'; recognition.continuous = true; recognition.interimResults = true
+    recognition.onresult = (event: any) => {
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        const content = String(result?.[0]?.transcript || '').trim()
+        if (content) receiveTurn({ role: 'parent', content, final: Boolean(result.isFinal), sequence: 1_000_000 + index })
+      }
+    }
+    recognition.onerror = (event: any) => { if (event?.error !== 'aborted' && event?.error !== 'no-speech') addDiagnostic(`浏览器转写不可用：${event?.error || '未知错误'}`) }
+    recognition.onend = () => {
+      if (browserRecognitionActiveRef.current) { try { recognition.start() } catch { /* already restarting */ } }
+    }
+    browserRecognitionRef.current = recognition
+    try { recognition.start() } catch { browserRecognitionActiveRef.current = false }
+  }
+
+  function stopBrowserTranscription() {
+    browserRecognitionActiveRef.current = false
+    const recognition = browserRecognitionRef.current
+    browserRecognitionRef.current = null
+    try { recognition?.abort?.() } catch { /* recognition already stopped */ }
+  }
+
   const avatar = useMemo(() => renderAvatar?.(state) || <div className="fdv-orb" style={{ transform: `scale(${1 + Math.max(state.inputLevel, state.remoteLevel) * .15})` }}>声</div>, [renderAvatar, state])
   const canStart = state.phase === 'ready' || state.phase === 'idle' || state.phase === 'error' || state.phase === 'ended'
 
@@ -154,10 +192,10 @@ export function FullDuplexVoice({
       <div className="fdv-status"><span>{state.phase === 'connected' ? '正在聆听' : state.phase === 'connecting' ? '正在接通' : '语音顾问'}</span><p>{state.status}</p></div>
     </div>
     <div className="fdv-actions">
-      {canStart && <button className="fdv-primary" onClick={() => void (state.phase === 'ready' ? start() : check())}>{state.phase === 'ready' ? startLabel : checkLabel}<span aria-hidden="true">→</span></button>}
+      {canStart && <button className="fdv-primary" onClick={() => void start()}>{startLabel}<span aria-hidden="true">→</span></button>}
       {state.phase === 'connected' && <><button className="fdv-secondary" onClick={() => void toggleMute()}>{state.muted ? '打开麦克风' : '静音'}</button><button className="fdv-secondary" onClick={() => void interrupt()}>打断</button><button className="fdv-danger" onClick={() => void end()}>结束通话</button></>}
     </div>
-    {turns.length > 0 && <ol className="fdv-transcript" aria-live="polite">{turns.map((turn, index) => <li key={`${turn.role}-${turn.sequence}-${index}`} className={turn.role}><b>{turn.role === 'agent' ? '顾问' : turn.role === 'child' ? '孩子' : '客户'}</b><span>{turn.content}</span></li>)}</ol>}
+    {showTranscript && turns.length > 0 && <ol className="fdv-transcript" aria-live="polite">{turns.map((turn, index) => <li key={`${turn.role}-${turn.sequence}-${index}`} className={turn.role}><b>{turn.role === 'agent' ? '顾问' : turn.role === 'child' ? '孩子' : '客户'}</b><span>{turn.content}</span></li>)}</ol>}
   </section>
 }
 

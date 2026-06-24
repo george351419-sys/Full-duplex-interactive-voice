@@ -16,6 +16,7 @@ export type LeadProfile = {
   consentToFollowUp: boolean | null
   preferences: string[]
   concerns: string[]
+  customFields: Record<string, string>
 }
 
 export type Evidence = { field: string; value: string; source: string; confidence: number }
@@ -34,6 +35,7 @@ export type LeadPatch = Partial<Omit<LeadProfile, 'preferredAreas' | 'propertyTy
   propertyTypes?: string[]
   preferences?: string[]
   concerns?: string[]
+  customFields?: Record<string, string>
   evidence?: Evidence[]
 }
 
