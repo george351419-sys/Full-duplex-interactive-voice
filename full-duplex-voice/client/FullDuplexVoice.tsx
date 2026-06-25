@@ -21,6 +21,7 @@ export type FullDuplexVoiceProps = {
   onComplete?: (result: VoiceCompletion) => void | Promise<void>
   autoEndAfterSilenceMs?: number
   shouldAutoEnd?: (turns: TranscriptTurn[]) => boolean
+  enableLocalSpeechFallback?: boolean
 }
 
 const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实时语音', muted: false, inputLevel: 0, remoteLevel: 0, elapsedSeconds: 0, diagnostics: [] }
@@ -28,7 +29,7 @@ const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实
 export function FullDuplexVoice({
   mode, context = {}, apiBaseUrl = '/api/full-duplex-voice', voiceProfile = 'official_o', title,
   eyebrow, initialStatus, checkLabel = '检查语音通路', startLabel = '开始实时对话',
-  className = '', renderAvatar, onTranscript, onStateChange, onComplete, autoEndAfterSilenceMs, shouldAutoEnd,
+  className = '', renderAvatar, onTranscript, onStateChange, onComplete, autoEndAfterSilenceMs, shouldAutoEnd, enableLocalSpeechFallback = false,
 }: FullDuplexVoiceProps) {
   const [state, setState] = useState<VoiceState>(() => ({ ...initialState, status: initialStatus || initialState.status }))
   const [turns, setTurns] = useState<TranscriptTurn[]>([])
@@ -41,6 +42,8 @@ export function FullDuplexVoice({
   const stateRef = useRef(state)
   const endingRef = useRef(false)
   const lastAudioAtRef = useRef(Date.now())
+  const localSpeechRef = useRef<any>(null)
+  const localSpeechSeqRef = useRef(10_000)
 
   const isChildMode = mode === 'child_pet'
   const isSalesMode = mode === 'sales_advisor'
@@ -99,11 +102,12 @@ export function FullDuplexVoice({
       rtcRef.current = createRtcSession({
         session, audioElement: audioRef.current,
         onStatus: (status) => update({ status }), onDiagnostic: addDiagnostic,
-        onRemoteLevel: (remoteLevel) => { if (remoteLevel > .03) lastAudioAtRef.current = Date.now(); update({ remoteLevel }) }, onRemoteReady: () => addDiagnostic('已订阅远端音频。'),
+        onRemoteLevel: (remoteLevel) => { if (remoteLevel > .05) lastAudioAtRef.current = Date.now(); update({ remoteLevel }) }, onRemoteReady: () => addDiagnostic('已订阅远端音频。'),
         onTranscript: receiveTurn,
       })
       await rtcRef.current.start()
       await startVoiceSession({ baseUrl: apiBaseUrl, session, mode, context })
+      startLocalSpeechFallback()
       update({ phase: 'connected', status: '已连接，直接说话即可。' })
     } catch (error: any) {
       await teardown(false)
@@ -146,9 +150,52 @@ export function FullDuplexVoice({
     await rtcRef.current?.stop().catch(() => {})
     rtcRef.current = null
     analyserCleanupRef.current?.(); analyserCleanupRef.current = null
+    stopLocalSpeechFallback()
     streamRef.current?.getTracks().forEach((track) => track.stop()); streamRef.current = null
     sessionRef.current = null
     if (announce) update({ phase: 'ended', muted: false, inputLevel: 0, remoteLevel: 0, status: '实时语音已结束。' })
+  }
+
+  function startLocalSpeechFallback() {
+    if (!enableLocalSpeechFallback || localSpeechRef.current) return
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      addDiagnostic('当前浏览器不支持本地语音转写兜底。')
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'zh-CN'
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.onresult = (event: any) => {
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index]
+        if (!result?.isFinal) continue
+        const content = String(result[0]?.transcript || '').trim()
+        if (!content) continue
+        receiveTurn({ role: 'parent', content, final: true, sequence: localSpeechSeqRef.current++ })
+      }
+    }
+    recognition.onerror = (event: any) => addDiagnostic(`本地转写暂不可用：${event?.error || 'unknown'}`)
+    recognition.onend = () => {
+      localSpeechRef.current = null
+      if (stateRef.current.phase === 'connected' && !endingRef.current) window.setTimeout(startLocalSpeechFallback, 250)
+    }
+    try {
+      localSpeechRef.current = recognition
+      recognition.start()
+      addDiagnostic('已启用浏览器本地转写兜底。')
+    } catch (error: any) {
+      localSpeechRef.current = null
+      addDiagnostic(`本地转写启动失败：${readableError(error)}`)
+    }
+  }
+
+  function stopLocalSpeechFallback() {
+    const recognition = localSpeechRef.current
+    localSpeechRef.current = null
+    if (!recognition) return
+    try { recognition.onend = null; recognition.stop() } catch {}
   }
 
   function startInputMeter(stream: MediaStream) {
@@ -161,7 +208,7 @@ export function FullDuplexVoice({
     const tick = () => {
       analyser.getByteFrequencyData(samples)
       const inputLevel = Math.min(1, samples.reduce((sum, value) => sum + value, 0) / samples.length / 96)
-      if (inputLevel > .03) lastAudioAtRef.current = Date.now()
+      if (inputLevel > .08) lastAudioAtRef.current = Date.now()
       update({ inputLevel })
       frame = requestAnimationFrame(tick)
     }

@@ -68,7 +68,7 @@ export function RealEstateSalesDemo({
     const finalTurns = turns.filter((turn) => turn.final)
     const customerTurns = finalTurns.filter((turn) => turn.role !== 'agent')
     const agentSummary = finalTurns.some((turn) => turn.role === 'agent' && /总结|了解到|整理|下一步|安排|补充|纠正/.test(turn.content))
-    return customerTurns.length > 0 && Boolean(progress?.qualified || (customerTurns.length >= 3 && agentSummary))
+    return customerTurns.length > 0 && Boolean((progress?.score ?? 0) >= 40 || progress?.qualified || agentSummary)
   }
 
   if (error) return <section className="re-demo-state"><strong>暂时无法开始</strong><p>{error}</p><button onClick={() => void createLead()}>重新准备</button></section>
@@ -91,6 +91,7 @@ export function RealEstateSalesDemo({
         context={{ persona: { projectName, leadId: lead.id, roleName: module.roleName, collectFields: module.collectFields }, memory: { profile: lead.profile, missing: progress.missing, moduleOpening: module.opening } }}
         autoEndAfterSilenceMs={5000}
         shouldAutoEnd={readyToAutoEnd}
+        enableLocalSpeechFallback
         onTranscript={queueTurn}
         onComplete={complete}
         renderAvatar={(state) => <div className={`re-demo-avatar ${state.remoteLevel > .04 ? 'speaking' : ''}`}><span>家</span></div>}
