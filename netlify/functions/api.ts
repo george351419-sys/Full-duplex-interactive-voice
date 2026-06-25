@@ -125,7 +125,7 @@ async function handleVoiceRequest(method: string, path: string, body: any) {
     const requestMode = mode(body)
     const context = (body?.context || {}) as VoiceContext
     const instructions = buildRealEstateSalesInstructions({
-      mode: requestMode,
+      mode: 'sales_advisor',
       context: (context.persona || context.memory || {}) as Record<string, unknown>,
     })
     const result = await startVoiceChat({ config, session, mode: requestMode, instructions })
@@ -146,7 +146,7 @@ async function handleVoiceRequest(method: string, path: string, body: any) {
 }
 
 function mode(body: any): VoiceMode {
-  return body?.mode === 'child_pet' ? 'child_pet' : 'parent_onboarding'
+  return 'sales_advisor'
 }
 
 function parseBody(event: any) {

@@ -37,8 +37,10 @@ export function FullDuplexVoice({
   const analyserCleanupRef = useRef<(() => void) | null>(null)
   const turnsRef = useRef<TranscriptTurn[]>([])
 
-  const label = title || (mode === 'parent_onboarding' ? '实时语音访谈' : '实时语音陪伴')
-  const labelEyebrow = eyebrow || (mode === 'parent_onboarding' ? '家长访谈' : '儿童陪伴')
+  const isChildMode = mode === 'child_pet'
+  const isSalesMode = mode === 'sales_advisor'
+  const label = title || (isSalesMode ? '实时语音顾问' : mode === 'parent_onboarding' ? '实时语音访谈' : '实时语音陪伴')
+  const labelEyebrow = eyebrow || (isSalesMode ? '销售沟通' : mode === 'parent_onboarding' ? '家长访谈' : '儿童陪伴')
   const update = (next: Partial<VoiceState>) => setState((previous) => ({ ...previous, ...next }))
   const addDiagnostic = (line: string) => setState((previous) => ({ ...previous, diagnostics: [...previous.diagnostics.slice(-7), line] }))
 
@@ -91,7 +93,7 @@ export function FullDuplexVoice({
   }
 
   function receiveTurn(turn: TranscriptTurn) {
-    const adjusted: TranscriptTurn = { ...turn, role: turn.role === 'parent' && mode === 'child_pet' ? 'child' : turn.role }
+    const adjusted: TranscriptTurn = { ...turn, role: turn.role === 'parent' && isChildMode ? 'child' : turn.role }
     turnsRef.current = mergeTurn(turnsRef.current, adjusted)
     setTurns(turnsRef.current.slice(-12))
     onTranscript?.(adjusted)

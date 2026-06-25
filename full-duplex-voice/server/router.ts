@@ -38,5 +38,9 @@ export function createDoubaoRealtimeRouter(options: FullDuplexVoiceRouterOptions
   return router
 }
 
-function mode(req: Request): VoiceMode { return req.body?.mode === 'child_pet' ? 'child_pet' : 'parent_onboarding' }
+function mode(req: Request): VoiceMode {
+  if (req.body?.mode === 'child_pet') return 'child_pet'
+  if (req.body?.mode === 'sales_advisor') return 'sales_advisor'
+  return 'parent_onboarding'
+}
 function respond(res: Response, result: any) { res.status(result.ok ? 200 : result.status || 502).json(result) }

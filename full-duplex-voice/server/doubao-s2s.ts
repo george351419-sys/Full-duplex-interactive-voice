@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { signVolcRequest } from './volc-sign.ts'
 
-export type VoiceMode = 'parent_onboarding' | 'child_pet'
+export type VoiceMode = 'parent_onboarding' | 'child_pet' | 'sales_advisor'
 export type VoiceProfile = 'official_o' | 'env'
 export type VoiceContext = { persona?: Record<string, unknown> | null; memory?: Record<string, unknown> | null }
 
@@ -54,7 +54,8 @@ export function createSession(config: DoubaoS2SConfig, input: { mode: VoiceMode;
   const id = () => crypto.randomUUID().replace(/-/g, '')
   const taskId = `voice_${id().slice(0, 20)}`
   const roomId = `full_duplex_${id().slice(0, 20)}`
-  const userId = `${input.mode === 'child_pet' ? 'child' : 'parent'}_${id().slice(0, 16)}`
+  const userIdPrefix = input.mode === 'child_pet' ? 'child' : input.mode === 'sales_advisor' ? 'customer' : 'parent'
+  const userId = `${userIdPrefix}_${id().slice(0, 16)}`
   const expiresAt = Math.floor(Date.now() / 1000) + 2 * 60 * 60
   const speaker = voiceProfile === 'env' ? config.speaker : OFFICIAL_O_SPEAKER
   const s2sModelVersion = voiceProfile === 'env' ? config.s2sModelVersion : OFFICIAL_O_S2S_MODEL_VERSION
@@ -73,18 +74,27 @@ export function buildDefaultInstructions(input: { mode: VoiceMode; context: Voic
     '当信息足够时，主动总结并邀请家长补充或纠正。',
     `已有信息：${JSON.stringify(input.context, null, 2)}`,
   ].join('\n')
-  return [
+  if (input.mode === 'child_pet') return [
     '你是一只会说话的电子宠物，用中文陪伴4到8岁的孩子。',
     '先回应孩子情绪，再轻轻追问一个问题。用短句，不说教；孩子可以打断你，立刻停止并继续听。',
     '遇到危险、自伤、暴力或隐私内容，温柔建议孩子立刻告诉身边大人。',
     `宠物档案与记忆：${JSON.stringify(input.context, null, 2)}`,
   ].join('\n')
+  return [
+    '你是一位中文语音销售顾问，负责自然、专业、克制地了解客户需求。',
+    '每次只问一个问题，先回应客户，再追问最关键的缺失信息；不要像填表。',
+    '不得虚构价格、政策、收益或承诺，不确定的信息必须说明需要核实。',
+    `业务上下文：${JSON.stringify(input.context, null, 2)}`,
+  ].join('\n')
 }
 
 export function buildStartPayload(input: { session: DoubaoSession; mode: VoiceMode; instructions: string }) {
-  const welcomeMessage = input.mode === 'parent_onboarding'
-    ? '你好呀，我是小颖。我们不填表，就像聊天一样聊聊孩子。宝贝几岁啦？平时更安静还是更活泼？'
-    : '嗨，我醒啦！今天有没有一个小开心？或者我们一起编一个秘密小故事？'
+  const welcomeMessage = input.mode === 'sales_advisor'
+    ? '您好，我是您的房产顾问。我们先简单聊聊您的需求，这次主要是想买房、租房，还是先了解一下市场？'
+    : input.mode === 'parent_onboarding'
+      ? '你好呀，我是小颖。我们不填表，就像聊天一样聊聊孩子。宝贝几岁啦？平时更安静还是更活泼？'
+      : '嗨，我醒啦！今天有没有一个小开心？或者我们一起编一个秘密小故事？'
+  const botName = input.mode === 'sales_advisor' ? '房产顾问' : input.mode === 'parent_onboarding' ? '小颖' : '电子宠物'
   return {
     AppId: input.session.appId, RoomId: input.session.roomId, TaskId: input.session.taskId,
     AgentConfig: { UserId: input.session.agentUserId, TargetUserId: [input.session.userId], WelcomeMessage: welcomeMessage, EnableConversationStateCallback: true, AnsMode: 3 },
@@ -93,7 +103,7 @@ export function buildStartPayload(input: { session: DoubaoSession; mode: VoiceMo
         Provider: 'volcano', OutputMode: 0,
         ProviderParams: {
           app: { appid: '${DOUBAO_VOICE_APP_ID}', token: '${DOUBAO_VOICE_ACCESS_TOKEN}' },
-          dialog: { extra: { model: input.session.s2sModelVersion }, bot_name: input.mode === 'parent_onboarding' ? '小颖' : '电子宠物', system_role: input.instructions, speaking_style: '愉悦、温暖、有活力，像真实朋友。语速中等偏慢，不要客服机器人。' },
+          dialog: { extra: { model: input.session.s2sModelVersion }, bot_name: botName, system_role: input.instructions, speaking_style: '愉悦、温暖、有活力，像真实朋友。语速中等偏慢，不要客服机器人。' },
           tts: input.session.speaker ? { speaker: input.session.speaker } : undefined,
         },
       },

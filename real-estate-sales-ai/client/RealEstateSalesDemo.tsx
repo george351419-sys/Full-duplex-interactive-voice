@@ -57,7 +57,7 @@ export function RealEstateSalesDemo({
     </header>
     <section className="re-demo-layout">
       <FullDuplexVoice
-        mode="parent_onboarding"
+        mode="sales_advisor"
         eyebrow={module.eyebrow}
         title={module.title}
         initialStatus="准备连接实时语音"

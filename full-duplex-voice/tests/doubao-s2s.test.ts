@@ -26,4 +26,14 @@ test('creates an official-voice RTC session and S2S payload', () => {
 test('builds mode-specific Chinese instructions', () => {
   assert.match(buildDefaultInstructions({ mode: 'parent_onboarding', context: { persona: { childName: '豆豆' } } }), /访谈/)
   assert.match(buildDefaultInstructions({ mode: 'child_pet', context: { memory: { summary: '喜欢恐龙' } } }), /电子宠物/)
+  assert.match(buildDefaultInstructions({ mode: 'sales_advisor', context: { projectName: 'AI全双工语音' } }), /销售顾问/)
+})
+
+test('builds sales-advisor payload without parent onboarding copy', () => {
+  const session = createSession(getDoubaoS2SConfig(env), { mode: 'sales_advisor' })
+  assert.match(session.userId, /^customer_/)
+  const payload = buildStartPayload({ session, mode: 'sales_advisor', instructions: 'sales prompt' })
+  assert.equal(payload.Config.S2SConfig.ProviderParams.dialog.bot_name, '房产顾问')
+  assert.match(payload.AgentConfig.WelcomeMessage, /买房、租房/)
+  assert.doesNotMatch(payload.AgentConfig.WelcomeMessage, /孩子|宝贝|小颖/)
 })

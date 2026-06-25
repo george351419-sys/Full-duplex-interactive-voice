@@ -5,7 +5,7 @@ export function createRealEstateSalesVoiceRouter(options: Omit<FullDuplexVoiceRo
   return createDoubaoRealtimeRouter({
     ...options,
     buildInstructions: ({ context }) => buildRealEstateSalesInstructions({
-      mode: 'parent_onboarding',
+      mode: 'sales_advisor',
       context: (context.persona || context.memory || {}) as Record<string, unknown>,
     }),
   })

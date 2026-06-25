@@ -129,7 +129,7 @@ function nextQuestionFor(profile: LeadProfile, missing: string[]) {
   return '我已经了解得差不多了。还有什么居住偏好或顾虑，是我筛选房源时一定要注意的？'
 }
 
-export function buildRealEstateSalesInstructions(input: { mode: 'parent_onboarding' | 'child_pet'; context: Record<string, unknown> | null | undefined }) {
+export function buildRealEstateSalesInstructions(input: { mode: 'sales_advisor'; context: Record<string, unknown> | null | undefined }) {
   const project = String((input.context as any)?.projectName || 'AI全双工语音')
   const roleName = String((input.context as any)?.roleName || '房产顾问')
   const configuredFields = Array.isArray((input.context as any)?.collectFields)

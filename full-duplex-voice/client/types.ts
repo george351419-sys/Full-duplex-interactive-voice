@@ -1,4 +1,4 @@
-export type VoiceMode = 'parent_onboarding' | 'child_pet'
+export type VoiceMode = 'parent_onboarding' | 'child_pet' | 'sales_advisor'
 export type VoiceProfile = 'official_o' | 'env'
 export type VoicePhase = 'idle' | 'checking' | 'ready' | 'connecting' | 'connected' | 'error' | 'ended'
 
