@@ -44,6 +44,9 @@ export function FullDuplexVoice({
   const lastAudioAtRef = useRef(Date.now())
   const localSpeechRef = useRef<any>(null)
   const localSpeechSeqRef = useRef(10_000)
+  const localInterimRef = useRef('')
+  const localInterimTimerRef = useRef<number | null>(null)
+  const lastLocalCommitRef = useRef('')
 
   const isChildMode = mode === 'child_pet'
   const isSalesMode = mode === 'sales_advisor'
@@ -93,6 +96,9 @@ export function FullDuplexVoice({
     update({ phase: 'connecting', status: '正在加入实时语音房间…', elapsedSeconds: 0 })
     endingRef.current = false
     lastAudioAtRef.current = Date.now()
+    lastLocalCommitRef.current = ''
+    localInterimRef.current = ''
+    startLocalSpeechFallback()
     setTurns([]); turnsRef.current = []
     try {
       if (!streamRef.current) await check()
@@ -107,7 +113,6 @@ export function FullDuplexVoice({
       })
       await rtcRef.current.start()
       await startVoiceSession({ baseUrl: apiBaseUrl, session, mode, context })
-      startLocalSpeechFallback()
       update({ phase: 'connected', status: '已连接，直接说话即可。' })
     } catch (error: any) {
       await teardown(false)
@@ -138,6 +143,7 @@ export function FullDuplexVoice({
   async function end() {
     if (endingRef.current) return
     endingRef.current = true
+    flushLocalInterim()
     const session = sessionRef.current
     const result = session ? { session, mode, transcript: turnsRef.current.filter((turn) => turn.final), durationSeconds: stateRef.current.elapsedSeconds } : null
     await teardown(true)
@@ -166,14 +172,14 @@ export function FullDuplexVoice({
     const recognition = new SpeechRecognition()
     recognition.lang = 'zh-CN'
     recognition.continuous = true
-    recognition.interimResults = false
+    recognition.interimResults = true
     recognition.onresult = (event: any) => {
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const result = event.results[index]
-        if (!result?.isFinal) continue
         const content = String(result[0]?.transcript || '').trim()
         if (!content) continue
-        receiveTurn({ role: 'parent', content, final: true, sequence: localSpeechSeqRef.current++ })
+        if (result?.isFinal) commitLocalSpeech(content)
+        else scheduleLocalInterim(content)
       }
     }
     recognition.onerror = (event: any) => addDiagnostic(`本地转写暂不可用：${event?.error || 'unknown'}`)
@@ -192,10 +198,37 @@ export function FullDuplexVoice({
   }
 
   function stopLocalSpeechFallback() {
+    clearLocalInterimTimer()
     const recognition = localSpeechRef.current
     localSpeechRef.current = null
     if (!recognition) return
     try { recognition.onend = null; recognition.stop() } catch {}
+  }
+
+  function scheduleLocalInterim(content: string) {
+    localInterimRef.current = content
+    clearLocalInterimTimer()
+    localInterimTimerRef.current = window.setTimeout(() => flushLocalInterim(), 1300)
+  }
+
+  function flushLocalInterim() {
+    const content = localInterimRef.current.trim()
+    localInterimRef.current = ''
+    clearLocalInterimTimer()
+    if (content) commitLocalSpeech(content)
+  }
+
+  function clearLocalInterimTimer() {
+    if (localInterimTimerRef.current === null) return
+    window.clearTimeout(localInterimTimerRef.current)
+    localInterimTimerRef.current = null
+  }
+
+  function commitLocalSpeech(content: string) {
+    const normalized = content.replace(/\s+/g, '')
+    if (!normalized || normalized === lastLocalCommitRef.current) return
+    lastLocalCommitRef.current = normalized
+    receiveTurn({ role: 'parent', content, final: true, sequence: localSpeechSeqRef.current++ })
   }
 
   function startInputMeter(stream: MediaStream) {
