@@ -93,6 +93,7 @@ export function RealEstateSalesDemo({
         shouldAutoEnd={readyToAutoEnd}
         enableLocalSpeechFallback
         showTranscript={false}
+        oneClickStart
         onTranscript={queueTurn}
         onComplete={complete}
         renderAvatar={(state) => <div className={`re-demo-avatar ${state.remoteLevel > .04 ? 'speaking' : ''}`}><span>家</span></div>}

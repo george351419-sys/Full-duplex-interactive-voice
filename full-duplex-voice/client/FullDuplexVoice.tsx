@@ -23,6 +23,7 @@ export type FullDuplexVoiceProps = {
   shouldAutoEnd?: (turns: TranscriptTurn[]) => boolean
   enableLocalSpeechFallback?: boolean
   showTranscript?: boolean
+  oneClickStart?: boolean
 }
 
 const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实时语音', muted: false, inputLevel: 0, remoteLevel: 0, elapsedSeconds: 0, diagnostics: [] }
@@ -30,7 +31,7 @@ const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实
 export function FullDuplexVoice({
   mode, context = {}, apiBaseUrl = '/api/full-duplex-voice', voiceProfile = 'official_o', title,
   eyebrow, initialStatus, checkLabel = '检查语音通路', startLabel = '开始实时对话',
-  className = '', renderAvatar, onTranscript, onStateChange, onComplete, autoEndAfterSilenceMs, shouldAutoEnd, enableLocalSpeechFallback = false, showTranscript = true,
+  className = '', renderAvatar, onTranscript, onStateChange, onComplete, autoEndAfterSilenceMs, shouldAutoEnd, enableLocalSpeechFallback = false, showTranscript = true, oneClickStart = false,
 }: FullDuplexVoiceProps) {
   const [state, setState] = useState<VoiceState>(() => ({ ...initialState, status: initialStatus || initialState.status }))
   const [turns, setTurns] = useState<TranscriptTurn[]>([])
@@ -262,6 +263,8 @@ export function FullDuplexVoice({
 
   const avatar = useMemo(() => renderAvatar?.(state) || <div className="fdv-orb" style={{ transform: `scale(${1 + Math.max(state.inputLevel, state.remoteLevel) * .15})` }}>声</div>, [renderAvatar, state])
   const canStart = state.phase === 'ready' || state.phase === 'idle' || state.phase === 'error' || state.phase === 'ended'
+  const primaryLabel = oneClickStart || state.phase === 'ready' ? startLabel : checkLabel
+  const primaryAction = oneClickStart || state.phase === 'ready' ? start : check
 
   return <section className={`fdv fdv-${state.phase} ${className}`} aria-label={label}>
     <audio ref={audioRef} autoPlay playsInline />
@@ -275,7 +278,7 @@ export function FullDuplexVoice({
       <div className="fdv-status"><span>{state.phase === 'connected' ? '正在聆听' : state.phase === 'connecting' ? '正在接通' : '语音顾问'}</span><p>{state.status}</p></div>
     </div>
     <div className="fdv-actions">
-      {canStart && <button className="fdv-primary" onClick={() => void (state.phase === 'ready' ? start() : check())}>{state.phase === 'ready' ? startLabel : checkLabel}<span aria-hidden="true">→</span></button>}
+      {canStart && <button className="fdv-primary" onClick={() => void primaryAction()}>{primaryLabel}<span aria-hidden="true">→</span></button>}
       {state.phase === 'connected' && <><button className="fdv-secondary" onClick={() => void toggleMute()}>{state.muted ? '打开麦克风' : '静音'}</button><button className="fdv-secondary" onClick={() => void interrupt()}>打断</button><button className="fdv-danger" onClick={() => void end()}>结束通话</button></>}
     </div>
     {showTranscript && turns.length > 0 && <ol className="fdv-transcript" aria-live="polite">{turns.map((turn, index) => <li key={`${turn.role}-${turn.sequence}-${index}`} className={turn.role}><b>{turn.role === 'agent' ? '顾问' : turn.role === 'child' ? '孩子' : '客户'}</b><span>{turn.content}</span></li>)}</ol>}
