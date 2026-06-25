@@ -5,6 +5,7 @@ import {
   buildRealEstateSalesInstructions,
 } from '../../real-estate-sales-ai/server/index.ts'
 import {
+  finalizeLeadFromTranscript,
   recordAgentTurn,
   recordCustomerTurn,
 } from '../../real-estate-sales-ai/server/lead-service.ts'
@@ -82,8 +83,11 @@ async function handleLeadRequest(method: string, path: string, body: any) {
   }
 
   if (method === 'POST' && match[2] === 'complete') {
+    const progress = Array.isArray(body?.transcript)
+      ? await finalizeLeadFromTranscript(lead, body.transcript, extractor)
+      : progressFor(lead)
     store.save(lead)
-    return json(200, { lead, progress: progressFor(lead), summary: summarize(lead) })
+    return json(200, { lead, progress, summary: summarize(lead) })
   }
 
   return json(405, { error: 'Method not allowed.' })

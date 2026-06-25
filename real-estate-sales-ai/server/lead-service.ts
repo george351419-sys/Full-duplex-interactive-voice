@@ -94,6 +94,20 @@ export function recordAgentTurn(record: LeadRecord, text: string) {
   if (text.trim()) record.transcript.push({ role: 'agent', content: text.trim().slice(0, 800), at: new Date().toISOString() })
 }
 
+export async function finalizeLeadFromTranscript(record: LeadRecord, transcript: Array<{ role?: string; content?: string }>, extractor: LeadExtractor) {
+  const customerText = transcript
+    .filter((turn) => turn.role !== 'agent')
+    .map((turn) => String(turn.content || '').trim())
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 6000)
+  if (!customerText) return progressFor(record)
+  const patch = await extractor.extract({ text: customerText, profile: record.profile })
+  applyPatch(record, patch)
+  record.stage = stageFor(record)
+  return progressFor(record)
+}
+
 export function applyPatch(record: LeadRecord, rawPatch: LeadPatch) {
   const patch = patchSchema.parse(rawPatch)
   for (const field of ['city', 'bedrooms', 'budget', 'timeline', 'financing', 'viewingAvailability', 'contactName', 'contactMethod', 'consentToFollowUp', 'intent'] as const) {

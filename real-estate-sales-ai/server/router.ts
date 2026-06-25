@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { createDefaultExtractor, InMemoryLeadStore, progressFor, recordAgentTurn, recordCustomerTurn, type LeadExtractor, type LeadStore } from './lead-service.ts'
+import { createDefaultExtractor, finalizeLeadFromTranscript, InMemoryLeadStore, progressFor, recordAgentTurn, recordCustomerTurn, type LeadExtractor, type LeadStore } from './lead-service.ts'
 import type { LeadRecord } from './types.ts'
 
 export type RealEstateLeadRouterOptions = { store?: LeadStore; extractor?: LeadExtractor }
@@ -16,9 +16,10 @@ export function createRealEstateLeadRouter(options: RealEstateLeadRouterOptions 
     const progress = role === 'agent' ? (recordAgentTurn(lead, content), progressFor(lead)) : await recordCustomerTurn(lead, content, extractor)
     store.save(lead); res.json({ lead, progress })
   })
-  router.post('/:leadId/complete', (req, res) => {
+  router.post('/:leadId/complete', async (req, res) => {
     const lead = store.get(req.params.leadId) || reviveLead(req.params.leadId, req.body?.lead); if (!lead) return res.status(404).json({ error: 'Lead not found' })
-    store.save(lead); res.json({ lead, progress: progressFor(lead), summary: summarize(lead) })
+    const progress = Array.isArray(req.body?.transcript) ? await finalizeLeadFromTranscript(lead, req.body.transcript, extractor) : progressFor(lead)
+    store.save(lead); res.json({ lead, progress, summary: summarize(lead) })
   })
   return router
 }

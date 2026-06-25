@@ -58,7 +58,7 @@ export function RealEstateSalesDemo({
     if (!current) return
     const result = await request<LeadResponse>(leadApiBaseUrl, `/${current.id}/complete`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lead: current }),
+      body: JSON.stringify({ lead: current, transcript: completion.transcript }),
     })
     leadRef.current = result.lead; setLead(result.lead); setProgress(result.progress); onLeadUpdate?.(result.lead, result.progress)
     await onComplete?.(result.lead, completion)
