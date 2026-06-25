@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FullDuplexVoice, type TranscriptTurn, type VoiceCompletion } from '../../full-duplex-voice/client/index.ts'
 import { DEFAULT_MODULE, type ConversationModule } from './modules'
 import type { LeadProgress, LeadRecord } from './types'
@@ -21,30 +21,54 @@ export function RealEstateSalesDemo({
   const [lead, setLead] = useState<LeadRecord | null>(null)
   const [progress, setProgress] = useState<LeadProgress | null>(null)
   const [error, setError] = useState('')
+  const leadRef = useRef<LeadRecord | null>(null)
+  const pendingTurnsRef = useRef<Promise<void>>(Promise.resolve())
+
+  useEffect(() => { leadRef.current = lead }, [lead])
 
   useEffect(() => { void createLead() }, [])
 
   async function createLead() {
     try {
       const result = await request<LeadResponse>(leadApiBaseUrl, '', { method: 'POST' })
-      setLead(result.lead); setProgress(result.progress); onLeadUpdate?.(result.lead, result.progress)
+      leadRef.current = result.lead; setLead(result.lead); setProgress(result.progress); onLeadUpdate?.(result.lead, result.progress)
     } catch (cause: any) { setError(cause.message || '无法创建销售线索会话。') }
   }
 
-  async function saveTurn(turn: TranscriptTurn) {
-    if (!lead || !turn.final) return
-    const result = await request<LeadResponse>(leadApiBaseUrl, `/${lead.id}/turns`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: turn.role === 'agent' ? 'agent' : 'customer', content: turn.content }),
+  function queueTurn(turn: TranscriptTurn) {
+    if (!turn.final) return
+    pendingTurnsRef.current = pendingTurnsRef.current.then(() => saveTurn(turn)).catch((cause: any) => {
+      setError(cause.message || '对话转写保存失败。')
     })
-    setLead(result.lead); setProgress(result.progress); onLeadUpdate?.(result.lead, result.progress)
+  }
+
+  async function saveTurn(turn: TranscriptTurn) {
+    const current = leadRef.current
+    if (!current) return
+    const result = await request<LeadResponse>(leadApiBaseUrl, `/${current.id}/turns`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lead: current, role: turn.role === 'agent' ? 'agent' : 'customer', content: turn.content }),
+    })
+    leadRef.current = result.lead; setLead(result.lead); setProgress(result.progress); onLeadUpdate?.(result.lead, result.progress)
   }
 
   async function complete(completion: VoiceCompletion) {
-    if (!lead) return
-    const result = await request<LeadResponse>(leadApiBaseUrl, `/${lead.id}/complete`, { method: 'POST' })
-    setLead(result.lead); setProgress(result.progress); onLeadUpdate?.(result.lead, result.progress)
+    await pendingTurnsRef.current
+    const current = leadRef.current
+    if (!current) return
+    const result = await request<LeadResponse>(leadApiBaseUrl, `/${current.id}/complete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lead: current }),
+    })
+    leadRef.current = result.lead; setLead(result.lead); setProgress(result.progress); onLeadUpdate?.(result.lead, result.progress)
     await onComplete?.(result.lead, completion)
+  }
+
+  function readyToAutoEnd(turns: TranscriptTurn[]) {
+    const finalTurns = turns.filter((turn) => turn.final)
+    const customerTurns = finalTurns.filter((turn) => turn.role !== 'agent')
+    const agentSummary = finalTurns.some((turn) => turn.role === 'agent' && /总结|了解到|整理|下一步|安排|补充|纠正/.test(turn.content))
+    return customerTurns.length > 0 && Boolean(progress?.qualified || (customerTurns.length >= 3 && agentSummary))
   }
 
   if (error) return <section className="re-demo-state"><strong>暂时无法开始</strong><p>{error}</p><button onClick={() => void createLead()}>重新准备</button></section>
@@ -65,7 +89,9 @@ export function RealEstateSalesDemo({
         startLabel="开始与顾问对话"
         apiBaseUrl={voiceApiBaseUrl}
         context={{ persona: { projectName, leadId: lead.id, roleName: module.roleName, collectFields: module.collectFields }, memory: { profile: lead.profile, missing: progress.missing, moduleOpening: module.opening } }}
-        onTranscript={(turn) => void saveTurn(turn)}
+        autoEndAfterSilenceMs={5000}
+        shouldAutoEnd={readyToAutoEnd}
+        onTranscript={queueTurn}
         onComplete={complete}
         renderAvatar={(state) => <div className={`re-demo-avatar ${state.remoteLevel > .04 ? 'speaking' : ''}`}><span>家</span></div>}
       />

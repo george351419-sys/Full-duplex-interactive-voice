@@ -19,6 +19,8 @@ export type FullDuplexVoiceProps = {
   onTranscript?: (turn: TranscriptTurn) => void
   onStateChange?: (state: VoiceState) => void
   onComplete?: (result: VoiceCompletion) => void | Promise<void>
+  autoEndAfterSilenceMs?: number
+  shouldAutoEnd?: (turns: TranscriptTurn[]) => boolean
 }
 
 const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实时语音', muted: false, inputLevel: 0, remoteLevel: 0, elapsedSeconds: 0, diagnostics: [] }
@@ -26,7 +28,7 @@ const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实
 export function FullDuplexVoice({
   mode, context = {}, apiBaseUrl = '/api/full-duplex-voice', voiceProfile = 'official_o', title,
   eyebrow, initialStatus, checkLabel = '检查语音通路', startLabel = '开始实时对话',
-  className = '', renderAvatar, onTranscript, onStateChange, onComplete,
+  className = '', renderAvatar, onTranscript, onStateChange, onComplete, autoEndAfterSilenceMs, shouldAutoEnd,
 }: FullDuplexVoiceProps) {
   const [state, setState] = useState<VoiceState>(() => ({ ...initialState, status: initialStatus || initialState.status }))
   const [turns, setTurns] = useState<TranscriptTurn[]>([])
@@ -36,6 +38,9 @@ export function FullDuplexVoice({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const analyserCleanupRef = useRef<(() => void) | null>(null)
   const turnsRef = useRef<TranscriptTurn[]>([])
+  const stateRef = useRef(state)
+  const endingRef = useRef(false)
+  const lastAudioAtRef = useRef(Date.now())
 
   const isChildMode = mode === 'child_pet'
   const isSalesMode = mode === 'sales_advisor'
@@ -45,12 +50,24 @@ export function FullDuplexVoice({
   const addDiagnostic = (line: string) => setState((previous) => ({ ...previous, diagnostics: [...previous.diagnostics.slice(-7), line] }))
 
   useEffect(() => { onStateChange?.(state) }, [onStateChange, state])
+  useEffect(() => { stateRef.current = state }, [state])
   useEffect(() => () => { void teardown(false, false) }, [])
   useEffect(() => {
     if (state.phase !== 'connected') return
     const timer = window.setInterval(() => update({ elapsedSeconds: state.elapsedSeconds + 1 }), 1000)
     return () => window.clearInterval(timer)
   }, [state.elapsedSeconds, state.phase])
+  useEffect(() => {
+    if (!autoEndAfterSilenceMs || state.phase !== 'connected') return
+    const timer = window.setInterval(() => {
+      if (endingRef.current) return
+      if (Date.now() - lastAudioAtRef.current < autoEndAfterSilenceMs) return
+      if (shouldAutoEnd && !shouldAutoEnd(turnsRef.current)) return
+      update({ status: '已完成沟通，检测到静音，正在自动结束通话…' })
+      void end()
+    }, 500)
+    return () => window.clearInterval(timer)
+  }, [autoEndAfterSilenceMs, shouldAutoEnd, state.phase])
 
   async function check() {
     if (state.phase === 'checking' || state.phase === 'connecting') return
@@ -71,6 +88,8 @@ export function FullDuplexVoice({
   async function start() {
     if (state.phase === 'connecting' || state.phase === 'connected') return
     update({ phase: 'connecting', status: '正在加入实时语音房间…', elapsedSeconds: 0 })
+    endingRef.current = false
+    lastAudioAtRef.current = Date.now()
     setTurns([]); turnsRef.current = []
     try {
       if (!streamRef.current) await check()
@@ -80,7 +99,7 @@ export function FullDuplexVoice({
       rtcRef.current = createRtcSession({
         session, audioElement: audioRef.current,
         onStatus: (status) => update({ status }), onDiagnostic: addDiagnostic,
-        onRemoteLevel: (remoteLevel) => update({ remoteLevel }), onRemoteReady: () => addDiagnostic('已订阅远端音频。'),
+        onRemoteLevel: (remoteLevel) => { if (remoteLevel > .03) lastAudioAtRef.current = Date.now(); update({ remoteLevel }) }, onRemoteReady: () => addDiagnostic('已订阅远端音频。'),
         onTranscript: receiveTurn,
       })
       await rtcRef.current.start()
@@ -93,6 +112,7 @@ export function FullDuplexVoice({
   }
 
   function receiveTurn(turn: TranscriptTurn) {
+    lastAudioAtRef.current = Date.now()
     const adjusted: TranscriptTurn = { ...turn, role: turn.role === 'parent' && isChildMode ? 'child' : turn.role }
     turnsRef.current = mergeTurn(turnsRef.current, adjusted)
     setTurns(turnsRef.current.slice(-12))
@@ -112,8 +132,10 @@ export function FullDuplexVoice({
   }
 
   async function end() {
+    if (endingRef.current) return
+    endingRef.current = true
     const session = sessionRef.current
-    const result = session ? { session, mode, transcript: turnsRef.current.filter((turn) => turn.final), durationSeconds: state.elapsedSeconds } : null
+    const result = session ? { session, mode, transcript: turnsRef.current.filter((turn) => turn.final), durationSeconds: stateRef.current.elapsedSeconds } : null
     await teardown(true)
     if (result) await onComplete?.(result)
   }
@@ -136,7 +158,13 @@ export function FullDuplexVoice({
     audioContext.createMediaStreamSource(stream).connect(analyser)
     const samples = new Uint8Array(analyser.frequencyBinCount)
     let frame = 0
-    const tick = () => { analyser.getByteFrequencyData(samples); update({ inputLevel: Math.min(1, samples.reduce((sum, value) => sum + value, 0) / samples.length / 96) }); frame = requestAnimationFrame(tick) }
+    const tick = () => {
+      analyser.getByteFrequencyData(samples)
+      const inputLevel = Math.min(1, samples.reduce((sum, value) => sum + value, 0) / samples.length / 96)
+      if (inputLevel > .03) lastAudioAtRef.current = Date.now()
+      update({ inputLevel })
+      frame = requestAnimationFrame(tick)
+    }
     tick()
     analyserCleanupRef.current = () => { cancelAnimationFrame(frame); void audioContext.close() }
   }

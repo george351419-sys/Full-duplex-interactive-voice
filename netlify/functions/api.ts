@@ -19,6 +19,7 @@ import {
   type VoiceContext,
   type VoiceMode,
 } from '../../full-duplex-voice/server/doubao-s2s.ts'
+import type { LeadRecord } from '../../real-estate-sales-ai/server/types.ts'
 
 const store = new InMemoryLeadStore()
 const extractor = createDefaultExtractor()
@@ -63,7 +64,7 @@ async function handleLeadRequest(method: string, path: string, body: any) {
   const match = path.match(/^\/api\/real-estate\/leads\/([^/]+)(?:\/(turns|complete))?$/)
   if (!match) return null
 
-  const lead = store.get(match[1])
+  const lead = store.get(match[1]) || reviveLead(match[1], body?.lead)
   if (!lead) return json(404, { error: 'Lead not found' })
 
   if (method === 'GET' && !match[2]) {
@@ -175,4 +176,13 @@ function summarize(lead: any) {
     timing: p.timeline || '待确认',
     nextAction: progressFor(lead).qualified ? '安排房源匹配或预约看房' : `继续确认：${progressFor(lead).missing.join('、')}`,
   }
+}
+
+function reviveLead(id: string, value: any): LeadRecord | null {
+  if (!value || value.id !== id || !value.profile || !Array.isArray(value.transcript)) return null
+  return {
+    ...value,
+    evidence: Array.isArray(value.evidence) ? value.evidence : [],
+    transcript: value.transcript,
+  } as LeadRecord
 }
