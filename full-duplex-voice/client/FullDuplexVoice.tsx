@@ -22,6 +22,7 @@ export type FullDuplexVoiceProps = {
   autoEndAfterSilenceMs?: number
   shouldAutoEnd?: (turns: TranscriptTurn[]) => boolean
   enableLocalSpeechFallback?: boolean
+  showTranscript?: boolean
 }
 
 const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实时语音', muted: false, inputLevel: 0, remoteLevel: 0, elapsedSeconds: 0, diagnostics: [] }
@@ -29,7 +30,7 @@ const initialState: VoiceState = { phase: 'idle', status: '准备连接豆包实
 export function FullDuplexVoice({
   mode, context = {}, apiBaseUrl = '/api/full-duplex-voice', voiceProfile = 'official_o', title,
   eyebrow, initialStatus, checkLabel = '检查语音通路', startLabel = '开始实时对话',
-  className = '', renderAvatar, onTranscript, onStateChange, onComplete, autoEndAfterSilenceMs, shouldAutoEnd, enableLocalSpeechFallback = false,
+  className = '', renderAvatar, onTranscript, onStateChange, onComplete, autoEndAfterSilenceMs, shouldAutoEnd, enableLocalSpeechFallback = false, showTranscript = true,
 }: FullDuplexVoiceProps) {
   const [state, setState] = useState<VoiceState>(() => ({ ...initialState, status: initialStatus || initialState.status }))
   const [turns, setTurns] = useState<TranscriptTurn[]>([])
@@ -42,6 +43,7 @@ export function FullDuplexVoice({
   const stateRef = useRef(state)
   const endingRef = useRef(false)
   const lastAudioAtRef = useRef(Date.now())
+  const lastRemoteAudioAtRef = useRef(0)
   const localSpeechRef = useRef<any>(null)
   const localSpeechSeqRef = useRef(10_000)
   const localInterimRef = useRef('')
@@ -108,7 +110,14 @@ export function FullDuplexVoice({
       rtcRef.current = createRtcSession({
         session, audioElement: audioRef.current,
         onStatus: (status) => update({ status }), onDiagnostic: addDiagnostic,
-        onRemoteLevel: (remoteLevel) => { if (remoteLevel > .05) lastAudioAtRef.current = Date.now(); update({ remoteLevel }) }, onRemoteReady: () => addDiagnostic('已订阅远端音频。'),
+        onRemoteLevel: (remoteLevel) => {
+          if (remoteLevel > .05) {
+            const now = Date.now()
+            lastAudioAtRef.current = now
+            lastRemoteAudioAtRef.current = now
+          }
+          update({ remoteLevel })
+        }, onRemoteReady: () => addDiagnostic('已订阅远端音频。'),
         onTranscript: receiveTurn,
       })
       await rtcRef.current.start()
@@ -226,6 +235,8 @@ export function FullDuplexVoice({
 
   function commitLocalSpeech(content: string) {
     const normalized = content.replace(/\s+/g, '')
+    if (isLikelyAgentEcho(content)) return
+    if (Date.now() - lastRemoteAudioAtRef.current < 2200) return
     if (!normalized || normalized === lastLocalCommitRef.current) return
     lastLocalCommitRef.current = normalized
     receiveTurn({ role: 'parent', content, final: true, sequence: localSpeechSeqRef.current++ })
@@ -267,7 +278,7 @@ export function FullDuplexVoice({
       {canStart && <button className="fdv-primary" onClick={() => void (state.phase === 'ready' ? start() : check())}>{state.phase === 'ready' ? startLabel : checkLabel}<span aria-hidden="true">→</span></button>}
       {state.phase === 'connected' && <><button className="fdv-secondary" onClick={() => void toggleMute()}>{state.muted ? '打开麦克风' : '静音'}</button><button className="fdv-secondary" onClick={() => void interrupt()}>打断</button><button className="fdv-danger" onClick={() => void end()}>结束通话</button></>}
     </div>
-    {turns.length > 0 && <ol className="fdv-transcript" aria-live="polite">{turns.map((turn, index) => <li key={`${turn.role}-${turn.sequence}-${index}`} className={turn.role}><b>{turn.role === 'agent' ? '顾问' : turn.role === 'child' ? '孩子' : '客户'}</b><span>{turn.content}</span></li>)}</ol>}
+    {showTranscript && turns.length > 0 && <ol className="fdv-transcript" aria-live="polite">{turns.map((turn, index) => <li key={`${turn.role}-${turn.sequence}-${index}`} className={turn.role}><b>{turn.role === 'agent' ? '顾问' : turn.role === 'child' ? '孩子' : '客户'}</b><span>{turn.content}</span></li>)}</ol>}
   </section>
 }
 
@@ -279,6 +290,10 @@ function mergeTurn(turns: TranscriptTurn[], next: TranscriptTurn) {
   return copy.slice(-80)
 }
 function formatDuration(total: number) { return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}` }
+function isLikelyAgentEcho(content: string) {
+  const normalized = content.replace(/\s+/g, '')
+  return /我是.*房产顾问|您的房产顾问|我们先.*聊.*需求|这次主要是想买房租房|先了解一下市场|总价或者单价有没有/.test(normalized)
+}
 function readableError(error: any) {
   const raw = String(error?.message || error?.reason || error?.state || error?.code || error || '')
   if (/token_error|invalid_token|token/i.test(raw)) {

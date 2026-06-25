@@ -76,7 +76,7 @@ export function RealEstateSalesDemo({
   return <main className="re-demo">
     <header className="re-demo-intro">
       <div className="re-demo-brand"><span>声</span><p>{projectName}</p></div>
-      <div className="re-demo-intro-copy"><p>智能销售工作台</p><h1>把每一次沟通，变成更懂客户的服务。</h1></div>
+      <div className="re-demo-intro-copy"><p>智能销售工作台</p><h1>把每一次沟通变成更懂客户的服务</h1></div>
       <div className="re-demo-private">对话仅用于本次客户需求整理</div>
     </header>
     <section className="re-demo-layout">
@@ -92,6 +92,7 @@ export function RealEstateSalesDemo({
         autoEndAfterSilenceMs={5000}
         shouldAutoEnd={readyToAutoEnd}
         enableLocalSpeechFallback
+        showTranscript={false}
         onTranscript={queueTurn}
         onComplete={complete}
         renderAvatar={(state) => <div className={`re-demo-avatar ${state.remoteLevel > .04 ? 'speaking' : ''}`}><span>家</span></div>}
